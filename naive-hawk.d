@@ -1,5 +1,5 @@
-/home/muscatmat/Programming/vmi-naive-detector/naive-hawk.o: \
- /home/muscatmat/Programming/vmi-naive-detector/naive-hawk.c \
+/home/muscatmat/Programming/vmi-event-naive-detector/naive-hawk.o: \
+ /home/muscatmat/Programming/vmi-event-naive-detector/naive-hawk.cpp \
  /usr/include/stdc-predef.h /usr/include/stdlib.h /usr/include/features.h \
  /usr/include/x86_64-linux-gnu/sys/cdefs.h \
  /usr/include/x86_64-linux-gnu/bits/wordsize.h \
@@ -49,7 +49,8 @@
  /usr/local/src/libvmi-master/libvmi/libvmi.h \
  /usr/include/x86_64-linux-gnu/bits/timex.h \
  /usr/local/src/libvmi-master/libvmi/events.h \
- /usr/lib/gcc/x86_64-linux-gnu/5/include/stdbool.h
+ /usr/lib/gcc/x86_64-linux-gnu/5/include/stdbool.h \
+ /home/muscatmat/Programming/vmi-event-naive-detector/naive-hawk.h
 
 /usr/include/stdc-predef.h:
 
@@ -182,3 +183,5 @@
 /usr/local/src/libvmi-master/libvmi/events.h:
 
 /usr/lib/gcc/x86_64-linux-gnu/5/include/stdbool.h:
+
+/home/muscatmat/Programming/vmi-event-naive-detector/naive-hawk.h:

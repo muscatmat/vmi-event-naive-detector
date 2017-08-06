@@ -3,4 +3,6 @@
 
 void cleanup(vmi_instance_t vmi);
 
+bool list_processes(vmi_instance_t vmi);
+
 #endif

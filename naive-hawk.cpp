@@ -45,7 +45,7 @@ int main(int argc, char **argv)
     
     // Initialize the libvmi library.
     if (VMI_FAILURE ==
-        vmi_init(&vmi, VMI_XEN, (void*)vm_name, VMI_INIT_DOMAINNAME | VMI_INIT_EVENTS, NULL, NULL))
+        vmi_init_complete(&vmi, vm_name, VMI_INIT_DOMAINNAME | VMI_INIT_EVENTS, NULL, VMI_CONFIG_GLOBAL_FILE_ENTRY, NULL, NULL))
     {
         printf("Failed to init LibVMI library.\n");
         return 2;
@@ -69,14 +69,20 @@ int main(int argc, char **argv)
 
    do
    {
-        printf("Enter VMI Information request in format: <MODE> <STRUCT_TYPE> <STRUCT_OFFSET> <FIELD_NAME>\n");
+        printf("\nEnter VMI Information request in format: <MODE> <STRUCT_TYPE> <STRUCT_OFFSET> <FIELD_NAME>\n");
         int input_length = scanf("%c %s %x %s", &mode, struct_type, &addr_offset, struct_member);
         if (input_length != 4)
             break;
 
-        // MM - TODO: RETRIVE DATA
+        // MM - Supported struct types: PROCESS
+        if (strcmp(struct_type, "PROCESS") == 0){
+            // General case
+            if (list_processes(vmi) == false)
+                break;
 
-        // PRINT DATA
+            // MM - TODO: Compare offsets and field names for identification
+            continue;
+        }
 
         printf("Information entered: %c %s 0x%x %s\n", mode, struct_type, addr_offset, struct_member);
     } while ((ch = getchar()) != EOF || ch != '\n' || !interrupted);
@@ -85,6 +91,50 @@ int main(int argc, char **argv)
 
     printf("\nNaive Event Hawk-Eye Program Ended!\n");
     return 0;
+}
+
+bool list_processes(vmi_instance_t vmi){
+    unsigned long tasks_offset = vmi_get_offset(vmi, "linux_tasks");
+    unsigned long name_offset = vmi_get_offset(vmi, "linux_name");
+    unsigned long pid_offset = vmi_get_offset(vmi, "linux_pid");
+
+    addr_t list_head = vmi_translate_ksym2v(vmi, "init_task") + tasks_offset;
+
+    addr_t next_list_entry = list_head;
+
+    // Perform task list walk-through
+    addr_t current_process = 0;
+    char *procname = NULL;
+    vmi_pid_t pid = 0;
+    status_t status;
+
+    printf("\nPID\tProcess Name\n");
+    do {
+        current_process = next_list_entry - tasks_offset;
+
+        vmi_read_32_va(vmi, current_process + pid_offset, 0, (uint32_t*)&pid);
+
+        procname = vmi_read_str_va(vmi, current_process + name_offset, 0);
+        if (!procname) {
+            printf("Failed to find procname\n");
+            return false;
+        }
+
+        // Print details
+        printf("%d\t%s (struct addr: \%"PRIx64")\n", pid, procname, current_process);
+        if (procname) {
+            free(procname);
+            procname = NULL;
+        }
+
+        status = vmi_read_addr_va(vmi, next_list_entry, 0, &next_list_entry);
+        if (status == VMI_FAILURE) {
+            printf("Failed to read next pointer in loop at %"PRIx64"\n", next_list_entry);
+            return false;
+        }
+    } while(next_list_entry != list_head);
+
+    return true;
 }
 
 void cleanup(vmi_instance_t vmi)
