@@ -31,7 +31,7 @@ sudo ./build-app.sh naive-hawk naive-hawk.out
 To execute this program, kindly follow the steps below:
 
 ```
-sudo ./naive-hawk.out <VM Name>
+sudo ./naive-hawk.out <VM Name> <process-name (if applicable)>
 ```
 
 ## Versioning
