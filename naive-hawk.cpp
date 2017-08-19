@@ -31,6 +31,8 @@
 #define STATE_OFFSET 0x0
 #define TASK_STRUCT_SIZE 0x950
 
+#define TASK_DEAD 64 
+
 /////////////////////
 // Static Functions
 /////////////////////
@@ -128,6 +130,9 @@ int main(int argc, char **argv)
     // Setup event context data
     event_data->physical_addr = struct_addr;
     event_data->monitor_size = TASK_STRUCT_SIZE;
+    vmi_read_64_pa(vmi, struct_addr + STATE_OFFSET, &(event_data->process_state));
+    printf("Initial Process State: %lu\n", event_data->process_state);
+
     proc_event->data = event_data;
 
     if (vmi_register_event(vmi, proc_event) == VMI_FAILURE)
@@ -158,11 +163,65 @@ int main(int argc, char **argv)
 // Definitions
 /////////////////////
 
+event_response_t state_change_callback(vmi_instance_t vmi, vmi_event_t *event)
+{
+    struct event_data *data = (struct event_data *) event->data;
+
+    uint64_t state;
+    vmi_read_64_pa(vmi, data->physical_addr + STATE_OFFSET, &state);
+
+    if (state != data->process_state)
+    {
+        printf("New state of process is: %lu\n", state);
+        data->process_state = state;
+    }
+
+    if ((state & TASK_DEAD) != 0)
+    {
+        printf("Process is dead - Ending monitoring\n");
+
+        interrupted = -1;
+        return VMI_EVENT_RESPONSE_NONE;
+    }
+
+    if (vmi_register_event(vmi, proc_event) == VMI_FAILURE)
+    {
+        printf("Failed to register event in callback.\n");
+
+        interrupted = -1;
+        return VMI_EVENT_RESPONSE_NONE;
+    }
+
+    return VMI_EVENT_RESPONSE_NONE;
+}
+
+event_response_t name_change_callback(vmi_instance_t vmi, vmi_event_t *event)
+{
+    struct event_data *data = (struct event_data *) event->data;
+
+    char *procname = vmi_read_str_pa(vmi, data->physical_addr + NAME_OFFSET);
+    if (procname) 
+    {
+        printf("New process Name: %s\n", procname);
+        free(procname);
+    }
+
+    if (vmi_register_event(vmi, proc_event) == VMI_FAILURE)
+    {
+        printf("Failed to register event in callback.\n");
+
+        interrupted = -1;
+        return VMI_EVENT_RESPONSE_NONE;
+    }
+
+    return VMI_EVENT_RESPONSE_NONE;
+}
+
 event_response_t mem_write_cb(vmi_instance_t vmi, vmi_event_t *event) 
 { 
-    // Check that adddress hit is within monitoring range
     struct event_data *data = (struct event_data *) event->data;
     
+    // Check that adddress hit is within monitoring range    
     long event_addr = (event->mem_event.gfn << 12) + event->mem_event.offset;
     if (MONITOR_ALL == 1)
     {
@@ -180,23 +239,24 @@ event_response_t mem_write_cb(vmi_instance_t vmi, vmi_event_t *event)
     }
     else
     {
-        bool is_state_changed = false;
-        bool is_name_changed = false;
+        vmi_clear_event(vmi, event, NULL);
 
         if (MONITOR_STATE == 1 && event_addr == (data->physical_addr + STATE_OFFSET))
-            is_state_changed = true;
-
-        if (MONITOR_NAME == 1 && event_addr == (data->physical_addr + NAME_OFFSET)) 
-            is_name_changed = true;
-
-        if (is_state_changed == false && is_name_changed == false)
         {
-            //printf("\nEvent Address: \%"PRIx64" out of monitoring range\n", event_addr);
-
-            vmi_clear_event(vmi, event, NULL);
-            vmi_step_event(vmi, event, event->vcpu_id, 1, NULL);
+            vmi_step_event(vmi, event, event->vcpu_id, 1, state_change_callback);
             return VMI_EVENT_RESPONSE_NONE;
         }
+
+        if (MONITOR_NAME == 1 && event_addr == (data->physical_addr + NAME_OFFSET))
+        {
+            vmi_step_event(vmi, event, event->vcpu_id, 1, name_change_callback);
+            return VMI_EVENT_RESPONSE_NONE;
+        }
+
+        //printf("\nEvent Address: \%"PRIx64" out of monitoring range\n", event_addr);
+        
+        vmi_step_event(vmi, event, event->vcpu_id, 1, NULL);
+        return VMI_EVENT_RESPONSE_NONE;
     }
     
     print_event(event);
@@ -218,7 +278,7 @@ event_response_t mem_write_cb(vmi_instance_t vmi, vmi_event_t *event)
 
     vmi_clear_event(vmi, event, NULL);
 
-    // MM - TODO: Based on what has changed call different callback and read what has changed 18/08/17
+    // Based on what has changed call different callback and read what has changed
     vmi_step_event(vmi, event, event->vcpu_id, 1, NULL);
     return VMI_EVENT_RESPONSE_NONE;
 }
@@ -280,19 +340,6 @@ addr_t retrieve_process_info(vmi_instance_t vmi, char *req_process)
     } while(next_list_entry != list_head);
 
     return 0;
-}
-
-void print_event(vmi_event_t *event)
-{
-    printf("PAGE ACCESS: %c%c%c for GFN %"PRIx64" (offset %06"PRIx64") gla %016"PRIx64" (vcpu %"PRIu32")\n",
-        (event->mem_event.out_access & VMI_MEMACCESS_R) ? 'r' : '-',
-        (event->mem_event.out_access & VMI_MEMACCESS_W) ? 'w' : '-',
-        (event->mem_event.out_access & VMI_MEMACCESS_X) ? 'x' : '-',
-        event->mem_event.gfn,
-        event->mem_event.offset,
-        event->mem_event.gla,
-        event->vcpu_id
-    );
 }
 
 bool list_processes(vmi_instance_t vmi)
@@ -358,4 +405,17 @@ void cleanup(vmi_instance_t vmi)
     vmi_destroy(vmi);
 
     free(proc_event);
+}
+
+void print_event(vmi_event_t *event)
+{
+    printf("PAGE ACCESS: %c%c%c for GFN %"PRIx64" (offset %06"PRIx64") gla %016"PRIx64" (vcpu %"PRIu32")\n",
+        (event->mem_event.out_access & VMI_MEMACCESS_R) ? 'r' : '-',
+        (event->mem_event.out_access & VMI_MEMACCESS_W) ? 'w' : '-',
+        (event->mem_event.out_access & VMI_MEMACCESS_X) ? 'x' : '-',
+        event->mem_event.gfn,
+        event->mem_event.offset,
+        event->mem_event.gla,
+        event->vcpu_id
+    );
 }
