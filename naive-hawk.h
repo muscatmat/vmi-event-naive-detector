@@ -8,14 +8,14 @@
 struct event_data 
 {
     // Physical address of event to monitor
-    long physical_addr;
+    unsigned long physical_addr;
 
     // Size of monitoring page
-    long monitor_size;
+    unsigned long monitor_size;
 
     // Monitoring information
     unsigned long process_state;
-
+    addr_t next_process;
 };
 
 ///////////////////// 
@@ -26,6 +26,7 @@ void cleanup(vmi_instance_t vmi);
 
 event_response_t mem_write_cb(vmi_instance_t vmi, vmi_event_t *event);
 event_response_t state_change_callback(vmi_instance_t vmi, vmi_event_t *event);
+event_response_t next_task_change_callback(vmi_instance_t vmi, vmi_event_t *event);
 event_response_t name_change_callback(vmi_instance_t vmi, vmi_event_t *event);
 
 void free_event_data(vmi_event_t *event, status_t rc);

@@ -1,0 +1,18 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "taskName": "Run build sctipt",
+            "type": "shell",
+            "command": "${workspaceRoot}/build-app.sh",
+            "args": [
+                "${workspaceRoot}/naive-hawk",
+                "${workspaceRoot}/naive-hawk.out"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }
+    ]
+}
