@@ -12,6 +12,8 @@
 #include <inttypes.h>
 #include <signal.h>
 #include <unistd.h>
+#include <pthread.h>
+#include "naive-queue.h"
 
 #include <libvmi/libvmi.h> 
 #include <libvmi/events.h>
@@ -21,6 +23,8 @@
 /////////////////////
 // Defines
 /////////////////////
+#define UNUSED_PARAMETER(expr) (void)(expr);
+
 #define PAUSE_VM 0
 #define MONITOR_ALL 0
 #define MONITOR_NAME 0
@@ -33,6 +37,11 @@
 #define TASK_STRUCT_SIZE 0x950
 
 #define TASK_DEAD 64 
+
+// Event Names Contants
+#define INTERRUPTED_EVENT 0
+#define DEAD_PROCESS_EVENT 1
+#define PROCESS_CHANGE_EVENT 2
 
 /////////////////////
 // Static Functions
@@ -51,6 +60,8 @@ vmi_event_t *proc_event;
 unsigned long name_offset;
 unsigned long pid_offset;
 unsigned long tasks_offset;
+
+Queue<int> event_queue;
 
 int main(int argc, char **argv)
 {
@@ -90,6 +101,11 @@ int main(int argc, char **argv)
     }
     printf("LibVMI initialise succeeded!\n");
 
+    // Start security checking thread
+    pthread_t sec_thread;
+    if (pthread_create(&sec_thread, NULL, security_checking_thread, NULL) != 0)
+        printf("Failed to create thread");
+
     if(PAUSE_VM == 1) 
     {
         // Pause vm for consistent memory access
@@ -101,11 +117,6 @@ int main(int argc, char **argv)
         }
     }
 
-    // Retrieve process information
-    name_offset = vmi_get_offset(vmi, "linux_name");
-    pid_offset = vmi_get_offset(vmi, "linux_pid");
-    tasks_offset = vmi_get_offset(vmi, "linux_tasks");
-
     if (argc == 2)
     {
         list_processes(vmi);
@@ -114,7 +125,13 @@ int main(int argc, char **argv)
         printf("Naive Event Hawk-Eye Program Ended!\n");
         return 0;
     }
-    
+
+    // Retrieve offsets
+    name_offset = vmi_get_offset(vmi, "linux_name");
+    pid_offset = vmi_get_offset(vmi, "linux_pid");
+    tasks_offset = vmi_get_offset(vmi, "linux_tasks");
+
+    // Retrieve Process Information
     struct_addr = retrieve_process_info(vmi, argv[2]);
     if (struct_addr == 0)
     {
@@ -125,7 +142,7 @@ int main(int argc, char **argv)
         return 4;
     }
 
-    printf("Registering event for pysical addr: %"PRIx64"\n", struct_addr);
+    printf("Registering event for pysical addr: %" PRIx64"\n", struct_addr);
     // Register write memory event (>> 12 to point to page base)
     proc_event = (vmi_event_t *) malloc(sizeof(vmi_event_t));
     SETUP_MEM_EVENT(proc_event, struct_addr >> 12, VMI_MEMACCESS_W, mem_write_cb, 0);
@@ -137,7 +154,7 @@ int main(int argc, char **argv)
     printf("Initial Process State: %lu\n", event_data->process_state);
 
     vmi_read_64_pa(vmi, struct_addr + tasks_offset, &(event_data->next_process));
-    printf("Initial Next Process (struct addr: \%"PRIx64")\n", event_data->next_process - tasks_offset);
+    printf("Initial Next Process (struct addr: \%" PRIx64")\n", event_data->next_process - tasks_offset);
 
     if (event_data->next_process == vmi_translate_ksym2v(vmi, "init_task") + tasks_offset)
         printf("Task monitoring next process is init_task\n"); 
@@ -179,6 +196,7 @@ event_response_t state_change_callback(vmi_instance_t vmi, vmi_event_t *event)
         printf("Failed to register event in callback.\n");
 
         interrupted = -1;
+        
         return VMI_EVENT_RESPONSE_NONE;
     }
 
@@ -195,6 +213,7 @@ event_response_t state_change_callback(vmi_instance_t vmi, vmi_event_t *event)
 
     if ((state & TASK_DEAD) != 0)
     {
+        event_queue.push(DEAD_PROCESS_EVENT);
         printf("Process is dead - Ending monitoring\n");
 
         interrupted = -1;
@@ -222,8 +241,10 @@ event_response_t next_task_change_callback(vmi_instance_t vmi, vmi_event_t *even
     if (next_task == data->next_process)
         return VMI_EVENT_RESPONSE_NONE;
 
-    printf("New Task Struct: \%"PRIx64"\n", next_task - tasks_offset);
+    printf("New Task Struct: \%" PRIx64"\n", next_task - tasks_offset);
     data->next_process = next_task;
+
+    event_queue.push(PROCESS_CHANGE_EVENT);
 
     return VMI_EVENT_RESPONSE_NONE;
 }
@@ -266,7 +287,7 @@ event_response_t mem_write_cb(vmi_instance_t vmi, vmi_event_t *event)
 
         if (event_addr < min_addr && event_addr > max_addr)
         {
-            //printf("\nEvent Address: \%"PRIx64" out of monitoring range", event_addr);
+            //printf("\nEvent Address: \%" PRIx64" out of monitoring range", event_addr);
             vmi_step_event(vmi, event, event->vcpu_id, 1, NULL);
             return VMI_EVENT_RESPONSE_NONE;
         }
@@ -291,7 +312,7 @@ event_response_t mem_write_cb(vmi_instance_t vmi, vmi_event_t *event)
             return VMI_EVENT_RESPONSE_NONE;
         }
 
-        //printf("\nEvent Address: \%"PRIx64" out of monitoring range\n", event_addr);
+        //printf("\nEvent Address: \%" PRIx64" out of monitoring range\n", event_addr);
         
         vmi_step_event(vmi, event, event->vcpu_id, 1, NULL);
         return VMI_EVENT_RESPONSE_NONE;
@@ -299,7 +320,7 @@ event_response_t mem_write_cb(vmi_instance_t vmi, vmi_event_t *event)
     
     print_event(event);
 
-    printf("\nEvent Address: \%"PRIx64" Min Addr: \%"PRIx64" Max Addr: \%"PRIx64"\n", 
+    printf("\nEvent Address: \%" PRIx64" Min Addr: \%" PRIx64" Max Addr: \%" PRIx64"\n", 
     (event->mem_event.gfn << 12) + event->mem_event.offset, data->physical_addr, data->physical_addr + data->monitor_size);
 
     uint64_t state;
@@ -312,7 +333,7 @@ event_response_t mem_write_cb(vmi_instance_t vmi, vmi_event_t *event)
         free(procname);
     }
     
-    printf("State of process is: \%"PRIx64"\n", state);
+    printf("State of process is: \%" PRIx64"\n", state);
 
     // Based on what has changed call different callback and read what has changed
     vmi_step_event(vmi, event, event->vcpu_id, 1, NULL);
@@ -322,7 +343,7 @@ event_response_t mem_write_cb(vmi_instance_t vmi, vmi_event_t *event)
 void free_event_data(vmi_event_t *event, status_t rc)
 {
     struct event_data * data = (struct event_data *) event->data;
-    printf("Freeing data for physical address: \%"PRIx64" due to status %d \n", data->physical_addr, rc);
+    printf("Freeing data for physical address: \%" PRIx64" due to status %d \n", data->physical_addr, rc);
     free(data); 
 }
 
@@ -356,7 +377,7 @@ addr_t retrieve_process_info(vmi_instance_t vmi, char *req_process)
         }
 
         if (procname && strcmp(procname, req_process) == 0){
-            printf("Found Process with PID: %d and struct addr: \%"PRIx64"\n", pid, current_process);
+            printf("Found Process with PID: %d and struct addr: \%" PRIx64"\n", pid, current_process);
             free(procname);
             return vmi_translate_kv2p(vmi, current_process);
         }
@@ -370,7 +391,7 @@ addr_t retrieve_process_info(vmi_instance_t vmi, char *req_process)
         status = vmi_read_addr_va(vmi, next_list_entry, 0, &next_list_entry);
         if (status == VMI_FAILURE) 
         {
-            printf("Failed to read next pointer in loop at %"PRIx64"\n", next_list_entry);
+            printf("Failed to read next pointer in loop at %" PRIx64"\n", next_list_entry);
             return 0;
         }
     } while(next_list_entry != list_head);
@@ -411,7 +432,7 @@ bool list_processes(vmi_instance_t vmi)
         }
 
         // Print details
-        printf("%d\t%s (struct addr: \%"PRIx64")\n", pid, procname, current_process);
+        printf("%d\t%s (struct addr: \%" PRIx64")\n", pid, procname, current_process);
         if (procname) 
         {
             free(procname);
@@ -421,7 +442,7 @@ bool list_processes(vmi_instance_t vmi)
         status = vmi_read_addr_va(vmi, next_list_entry, 0, &next_list_entry);
         if (status == VMI_FAILURE)
          {
-            printf("Failed to read next pointer in loop at %"PRIx64"\n", next_list_entry);
+            printf("Failed to read next pointer in loop at %" PRIx64"\n", next_list_entry);
             return false;
         }
     } while(next_list_entry != list_head);
@@ -431,6 +452,9 @@ bool list_processes(vmi_instance_t vmi)
 
 void cleanup(vmi_instance_t vmi)
 {
+    // Send Interrupt event to security checking thread
+    event_queue.push(INTERRUPTED_EVENT);
+
     if(PAUSE_VM == 1) 
         vmi_resume_vm(vmi);
 
@@ -445,7 +469,7 @@ void cleanup(vmi_instance_t vmi)
 
 void print_event(vmi_event_t *event)
 {
-    printf("PAGE ACCESS: %c%c%c for GFN %"PRIx64" (offset %06"PRIx64") gla %016"PRIx64" (vcpu %"PRIu32")\n",
+    printf("PAGE ACCESS: %c%c%c for GFN %" PRIx64" (offset %06" PRIx64") gla %016" PRIx64" (vcpu %" PRIu32")\n",
         (event->mem_event.out_access & VMI_MEMACCESS_R) ? 'r' : '-',
         (event->mem_event.out_access & VMI_MEMACCESS_W) ? 'w' : '-',
         (event->mem_event.out_access & VMI_MEMACCESS_X) ? 'x' : '-',
@@ -454,4 +478,25 @@ void print_event(vmi_event_t *event)
         event->mem_event.gla,
         event->vcpu_id
     );
+}
+
+void *security_checking_thread(void *arg)
+{
+    UNUSED_PARAMETER(arg);
+    printf("Security Checking Thread Initated!\n");
+
+    int event_type;
+    while(true)
+    {
+        event_type = event_queue.pop();
+        printf("Event Acquired: %d\n", event_type);
+
+        if (event_type == 0)
+        {
+            printf("Security Checking Thread Ended!\n");
+            return NULL;
+        }
+    }
+    
+    return NULL;
 }

@@ -35,4 +35,6 @@ void print_event(vmi_event_t *event);
 addr_t retrieve_process_info(vmi_instance_t vmi, char *req_process);
 bool list_processes(vmi_instance_t vmi);
 
+void *security_checking_thread(void *arg);
+
 #endif

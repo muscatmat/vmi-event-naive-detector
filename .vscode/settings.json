@@ -3,6 +3,8 @@
         "errno.h": "c",
         "mman.h": "c",
         "stdio.h": "c",
-        "naive-hawk.h": "c"
+        "pthread.h": "c",
+        "naive-hawk.h": "c",
+        "array": "cpp"
     }
 }
