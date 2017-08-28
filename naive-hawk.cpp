@@ -41,7 +41,9 @@
 // Event Names Contants
 #define INTERRUPTED_EVENT 0
 #define DEAD_PROCESS_EVENT 1
-#define PROCESS_CHANGE_EVENT 2
+#define ADD_REMOVE_PROCESS_EVENT 2
+#define PROCESS_STATE_CHANGE_EVENT 4
+#define PROCESS_NAME_CHANGE_EVENT 8
 
 /////////////////////
 // Static Functions
@@ -219,6 +221,10 @@ event_response_t state_change_callback(vmi_instance_t vmi, vmi_event_t *event)
         interrupted = -1;
         return VMI_EVENT_RESPONSE_NONE;
     }
+    else
+    {
+        event_queue.push(PROCESS_STATE_CHANGE_EVENT);
+    }
 
     return VMI_EVENT_RESPONSE_NONE;
 }
@@ -244,7 +250,7 @@ event_response_t next_task_change_callback(vmi_instance_t vmi, vmi_event_t *even
     printf("New Task Struct: \%" PRIx64"\n", next_task - tasks_offset);
     data->next_process = next_task;
 
-    event_queue.push(PROCESS_CHANGE_EVENT);
+    event_queue.push(ADD_REMOVE_PROCESS_EVENT);
 
     return VMI_EVENT_RESPONSE_NONE;
 }
@@ -267,6 +273,8 @@ event_response_t name_change_callback(vmi_instance_t vmi, vmi_event_t *event)
         printf("New process Name: %s\n", procname);
         free(procname);
     }
+
+    event_queue.push(PROCESS_NAME_CHANGE_EVENT);
 
     return VMI_EVENT_RESPONSE_NONE;
 }
@@ -486,17 +494,43 @@ void *security_checking_thread(void *arg)
     printf("Security Checking Thread Initated!\n");
 
     int event_type;
-    while(true)
+    while(!interrupted)
     {
         event_type = event_queue.pop();
-        printf("Event Acquired: %d\n", event_type);
 
-        if (event_type == 0)
+        switch(event_type)
         {
-            printf("Security Checking Thread Ended!\n");
-            return NULL;
+            case INTERRUPTED_EVENT:
+            {
+                printf("Encountered INTERRUPTED_EVENT\n");
+                printf("Security Checking Thread Ended!\n");
+                return NULL;
+            }
+            case DEAD_PROCESS_EVENT:
+            {
+                printf("Encountered DEAD_PROCESS_EVENT\n");
+                break;
+            }
+            case ADD_REMOVE_PROCESS_EVENT:{
+                printf("Encountered ADD_REMOVE_PROCESS_EVENT\n");
+                break;
+            }
+            case PROCESS_STATE_CHANGE_EVENT:{
+                printf("Encountered PROCESS_STATE_CHANGE_EVENT\n");
+                break;
+            }
+            case PROCESS_NAME_CHANGE_EVENT:{
+                printf("Encountered PROCESS_NAME_CHANGE_EVENT\n");
+                break;
+            }
+            default:
+            {
+                printf("Unknown Event Type Acquired: %d\n", event_type);
+                break;
+            }
         }
     }
     
+    printf("Security Checking Thread Ended!\n");
     return NULL;
 }
