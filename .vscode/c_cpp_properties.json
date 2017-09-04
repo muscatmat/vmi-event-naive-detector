@@ -30,6 +30,7 @@
                 "/usr/include/glib-2.0",
                 "/usr/lib/x86_64-linux-gnu/glib-2.0/include",
                 "/usr/local/src/libvmi-master",
+                "/usr/include/python2.7",
                 "${workspaceRoot}"
             ],
             "defines": [],
@@ -44,6 +45,7 @@
                     "/usr/include/glib-2.0",
                     "/usr/lib/x86_64-linux-gnu/glib-2.0/include",
                     "/usr/local/src/libvmi-master",
+                    "/usr/include/python2.7",
                     "${workspaceRoot}"
                 ],
                 "limitSymbolsToIncludedHeaders": true,

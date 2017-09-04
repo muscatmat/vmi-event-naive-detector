@@ -5,6 +5,7 @@
         "stdio.h": "c",
         "pthread.h": "c",
         "naive-hawk.h": "c",
-        "array": "cpp"
+        "array": "cpp",
+        "chrono": "cpp"
     }
 }
