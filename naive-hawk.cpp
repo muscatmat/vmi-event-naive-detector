@@ -33,6 +33,7 @@
 // Event Names Contants
 #define INTERRUPTED_EVENT 0
 #define PROCESS_EVENT 1
+#define MODULE_EVENT 2
 
 /////////////////////
 // Static Functions
@@ -52,11 +53,14 @@ struct vmi_event_node *vmi_event_head;
 
 //  VM Specific Information (Retrieved from Volatility)
 #define TASK_STRUCT_SIZE 0x950
+#define MODULE_STRUCT_SIZE 0x258
 
 // Result Measurements
 #define MONITORING_MODE
 #define MEASURE_EVENT_CALLBACK_TIME
 //#define ALWAYS_SEND_EVENT
+//#define MONITOR_PROCESSES_EVENTS
+#define MONITOR_MODULES_EVENTS
 
 // Result variables
 long irrelevant_events_count = 0;
@@ -115,7 +119,8 @@ int main(int argc, char **argv)
             return 3;
         }
     }
-
+    
+    #ifdef MONITOR_PROCESSES_EVENTS
     // Register Processes Events
     if (register_processes_events(vmi) == false)
     {
@@ -125,6 +130,19 @@ int main(int argc, char **argv)
         printf("Naive Event Hawk-Eye Program Ended!\n");
         return 4;
     }
+    #endif
+
+    #ifdef MONITOR_MODULES_EVENTS
+    // Register Modules Events
+    if (register_modules_events(vmi) == false)
+    {
+        printf("Registering of modules events failed!\n");
+
+        cleanup(vmi);
+        printf("Naive Event Hawk-Eye Program Ended!\n");
+        return 5;
+    }
+    #endif
 
     printf("Waiting for events...\n");
     while (!interrupted)
@@ -194,7 +212,7 @@ event_response_t mem_write_cb(vmi_instance_t vmi, vmi_event_t *event)
     // print_event(event);
 
     #ifdef MONITORING_MODE
-    event_queue.push(PROCESS_EVENT);
+    event_queue.push(data->type);
     #endif
 
     vmi_step_event(vmi, event, event->vcpu_id, 1, NULL);
@@ -205,7 +223,7 @@ event_response_t mem_write_cb(vmi_instance_t vmi, vmi_event_t *event)
     #endif
 
     return VMI_EVENT_RESPONSE_NONE;
-}
+} 
 
 void free_event_data(vmi_event_t *event, status_t rc)
 {
@@ -262,15 +280,84 @@ bool register_processes_events(vmi_instance_t vmi)
         
         // Setup event context data
         struct event_data *event_data = (struct event_data *) malloc(sizeof(struct event_data));
+        event_data->type = PROCESS_EVENT;
         event_data->physical_addr = struct_addr;
         event_data->monitor_size = TASK_STRUCT_SIZE;
 
         proc_event->data = event_data;
 
         if (vmi_register_event(vmi, proc_event) == VMI_FAILURE)
-            printf("Failed to register event!\n");
+            printf("Failed to register process event!\n");
         else
             push_vmi_event(&vmi_event_head, proc_event);
+
+        status = vmi_read_addr_va(vmi, next_list_entry, 0, &next_list_entry);
+        if (status == VMI_FAILURE)
+        {
+            printf("Failed to read next pointer in loop at %" PRIx64"\n", next_list_entry);
+            return false;
+        }
+    } while(next_list_entry != list_head);
+
+    return true;
+}
+
+bool register_modules_events(vmi_instance_t vmi)
+{
+    printf("Registering Modules Events\n");
+
+    addr_t list_head;
+    if (vmi_read_addr_ksym(vmi, "modules", &list_head) == VMI_FAILURE)
+    {
+        printf("Failed to read modules kernel symbol\n");
+        return false;
+    } 
+
+    // Perform module list walk-through
+    addr_t next_list_entry = list_head;
+    char *modname = NULL;
+    status_t status;
+
+    printf("\nModule Name\n");
+    do 
+    {
+        if (VMI_PM_IA32E == vmi_get_page_mode(vmi, 0))   // 64-bit paging
+            modname = vmi_read_str_va(vmi, next_list_entry + 16, 0);
+        else 
+            modname = vmi_read_str_va(vmi, next_list_entry + 8, 0);
+
+        if (!modname) 
+        {
+            printf("Failed to find modname\n");
+            return false;
+        }
+
+        // Print details
+        printf("%s (struct addr: \%" PRIx64")\n", modname, next_list_entry);
+        if (modname) 
+        {
+            free(modname);
+            modname = NULL;
+        }
+
+        addr_t struct_addr = vmi_translate_kv2p(vmi, next_list_entry);
+        printf("Registering event for physical addr: %" PRIx64"\n", struct_addr);
+        // Register write memory event (>> 12 to point to page base)
+        vmi_event_t *mod_event = (vmi_event_t *) malloc(sizeof(vmi_event_t));
+        SETUP_MEM_EVENT(mod_event, struct_addr >> 12, VMI_MEMACCESS_W, mem_write_cb, 0);
+        
+        // Setup event context data
+        struct event_data *event_data = (struct event_data *) malloc(sizeof(struct event_data));
+        event_data->type = MODULE_EVENT;
+        event_data->physical_addr = struct_addr;
+        event_data->monitor_size = MODULE_STRUCT_SIZE;
+
+        mod_event->data = event_data;
+
+        if (vmi_register_event(vmi, mod_event) == VMI_FAILURE)
+            printf("Failed to register module event!\n");
+        else
+            push_vmi_event(&vmi_event_head, mod_event);
 
         status = vmi_read_addr_va(vmi, next_list_entry, 0, &next_list_entry);
         if (status == VMI_FAILURE)
@@ -362,15 +449,31 @@ void *security_checking_thread(void *arg)
     {
         event_type = event_queue.pop();
 
-        if (event_type == INTERRUPTED_EVENT)
+        switch (event_type)
         {
-            printf("Encountered INTERRUPTED_EVENT\n");
-            printf("Security Checking Thread Ended!\n"); 
-            // Py_Finalize();
-            return NULL;
+            case PROCESS_EVENT:{
+                printf("Encountered PROCESS_EVENT\n");
+                break;
+            } 
+            case MODULE_EVENT:{
+                printf("Encountered MODULE_EVENT\n");
+                break;
+            } 
+            case INTERRUPTED_EVENT:
+            {
+                printf("Encountered INTERRUPTED_EVENT\n");
+                printf("Security Checking Thread Ended!\n"); 
+                // Py_Finalize();
+                return NULL;
+            }
+            default:
+            {
+                printf("Unkown event encountered\n");
+                printf("Security Checking Thread Ended!\n"); 
+                // Py_Finalize();
+                return NULL;
+            }
         }
-           
-        printf("Encountered PROCESS_EVENT\n");
     }
     
     printf("Security Checking Thread Ended!\n");
