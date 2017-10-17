@@ -19,10 +19,14 @@
 #include <libvmi/libvmi.h> 
 #include <libvmi/events.h>
 
-#include "naive-queue.h"
+#include "naive-deque.h"
 #include "naive-event-list.h"
 #include "naive-hawk.h"
 
+#include <atomic>
+
+using namespace std;
+  
 /////////////////////
 // Defines
 /////////////////////
@@ -34,37 +38,43 @@
 #define INTERRUPTED_EVENT 0
 #define PROCESS_EVENT 1
 #define MODULE_EVENT 2
-
-/////////////////////
-// Static Functions
-/////////////////////
-static int interrupted = 0;
-static void close_handler(int sig)
-{
-    interrupted = sig;
-}
+#define AFINFO_EVENT 4
 
 /////////////////////
 // Global Variables
 /////////////////////
 
-Queue<int> event_queue;
+Deque<int> event_deque;
 struct vmi_event_node *vmi_event_head;
 
 //  VM Specific Information (Retrieved from Volatility)
 #define TASK_STRUCT_SIZE 0x950
 #define MODULE_STRUCT_SIZE 0x258
+#define TCP_AFINFO_STRUCT_SIZE 0x38
+#define UDP_AFINFO_STRUCT_SIZE 0x40
 
 // Result Measurements
 #define MONITORING_MODE
 #define MEASURE_EVENT_CALLBACK_TIME
-//#define ALWAYS_SEND_EVENT
+#define ALWAYS_SEND_EVENT /* Always send event due to register multiple event on same page failure */
 //#define MONITOR_PROCESSES_EVENTS
 #define MONITOR_MODULES_EVENTS
+//#define MONITOR_AFINFO_EVENTS
 
 // Result variables
 long irrelevant_events_count = 0;
 long monitored_events_count = 0;
+
+/////////////////////
+// Static Functions
+/////////////////////
+static atomic<bool> interrupted(false);
+static void close_handler(int sig)
+{
+    UNUSED_PARAMETER(sig); 
+    interrupted = true;
+    event_deque.push_front(INTERRUPTED_EVENT);
+}
 
 int main(int argc, char **argv)
 {
@@ -77,6 +87,25 @@ int main(int argc, char **argv)
         printf("Naive Event Hawk-Eye Program Ended!\n");
         return 1; 
     }
+
+    // FILE *fp;
+    // char path[1035];
+
+    // fp = popen("python python-scripts/test.py", "r");
+    //     if (fp == NULL) {
+    //     printf("Failed to run command\n" );
+    //     exit(1);
+    // }
+
+    // /* Read the output a line at a time - output it. */
+    // while (fgets(path, sizeof(path)-1, fp) != NULL) {
+    //     printf("%s", path);
+    // }
+
+    // /* close */
+    // pclose(fp);
+
+    //system("python python-scripts/test.py");
 
     // Initialise variables
     vmi_instance_t vmi;
@@ -100,12 +129,12 @@ int main(int argc, char **argv)
         printf("Failed to init LibVMI library.\n");
         return 2;
     }
-    printf("LibVMI initialise succeeded!\n");
+    printf("LibVMI initialise succeeded: \%" PRIx64"\n", vmi);
 
     #ifdef MONITORING_MODE    
     // Start security checking thread
     pthread_t sec_thread;
-    if (pthread_create(&sec_thread, NULL, security_checking_thread, NULL) != 0)
+    if (pthread_create(&sec_thread, NULL, security_checking_thread, (void *)vmi) != 0)
         printf("Failed to create thread");
     #endif
 
@@ -144,6 +173,18 @@ int main(int argc, char **argv)
     }
     #endif
 
+    #ifdef MONITOR_AFINFO_EVENTS
+    // Register Afinfo Events
+    if (register_afinfo_events(vmi) == false)
+    {
+        printf("Registering of af info events failed!\n");
+
+        cleanup(vmi);
+        printf("Naive Event Hawk-Eye Program Ended!\n");
+        return 5;
+    }
+    #endif
+
     printf("Waiting for events...\n");
     while (!interrupted)
     {
@@ -175,8 +216,9 @@ event_response_t mem_write_cb(vmi_instance_t vmi, vmi_event_t *event)
         monitored_events_count++;
         vmi_clear_event(vmi, event, NULL);
 
+        struct event_data *any_data = (struct event_data *) event->data;
         #ifdef MONITORING_MODE
-        event_queue.push(PROCESS_EVENT);
+        event_deque.push_back(any_data->type);
         #endif
 
         vmi_step_event(vmi, event, event->vcpu_id, 1, NULL);
@@ -212,7 +254,7 @@ event_response_t mem_write_cb(vmi_instance_t vmi, vmi_event_t *event)
     // print_event(event);
 
     #ifdef MONITORING_MODE
-    event_queue.push(data->type);
+    event_deque.push_back(data->type);
     #endif
 
     vmi_step_event(vmi, event, event->vcpu_id, 1, NULL);
@@ -273,7 +315,7 @@ bool register_processes_events(vmi_instance_t vmi)
         }
 
         addr_t struct_addr = vmi_translate_kv2p(vmi, current_process);
-        printf("Registering event for physical addr: %" PRIx64"\n", struct_addr);
+        printf("Registering event for physical addr: %" PRIx64"\n", struct_addr >> 12);
         // Register write memory event (>> 12 to point to page base)
         vmi_event_t *proc_event = (vmi_event_t *) malloc(sizeof(vmi_event_t));
         SETUP_MEM_EVENT(proc_event, struct_addr >> 12, VMI_MEMACCESS_W, mem_write_cb, 0);
@@ -370,10 +412,131 @@ bool register_modules_events(vmi_instance_t vmi)
     return true;
 }
 
+bool register_afinfo_events(vmi_instance_t vmi){
+
+    printf("Registering Afinfo Events\n");
+    char *name = NULL;
+
+    // Register TCP Seq Afinfo Events
+    addr_t tcp_seq_afinfo[2];
+    if (vmi_read_addr_ksym(vmi, "tcp6_seq_afinfo", &tcp_seq_afinfo[0]) == VMI_FAILURE)
+    {
+        printf("Failed to read tcp6_seq_afinfo kernel symbol\n");
+        return false;
+    }
+
+    if (vmi_read_addr_ksym(vmi, "tcp4_seq_afinfo", &tcp_seq_afinfo[1]) == VMI_FAILURE)
+    {
+        printf("Failed to read tcp4_seq_afinfo kernel symbol\n");
+        return false;
+    } 
+
+    for (int i = 0; i < 2; i++){
+        name = vmi_read_str_va(vmi, tcp_seq_afinfo[i], 0);    
+        if (!name) 
+        {
+            printf("Failed to find name\n");
+            return false;
+        }
+
+        // Print details
+        printf("%s (struct addr: \%" PRIx64")\n", name, tcp_seq_afinfo[i]);
+        if (name) 
+        {
+            free(name);
+            name = NULL;
+        }
+
+        addr_t struct_addr = vmi_translate_kv2p(vmi, tcp_seq_afinfo[i]);
+        printf("Registering event for physical addr: %" PRIx64"\n", struct_addr >> 12);
+        // Register write memory event (>> 12 to point to page base)
+        vmi_event_t *net_event = (vmi_event_t *) malloc(sizeof(vmi_event_t));
+        SETUP_MEM_EVENT(net_event, struct_addr >> 12, VMI_MEMACCESS_W, mem_write_cb, 0);
+        
+        // Setup event context data
+        struct event_data *event_data = (struct event_data *) malloc(sizeof(struct event_data));
+        event_data->type = AFINFO_EVENT;
+        event_data->physical_addr = struct_addr;
+        event_data->monitor_size = TCP_AFINFO_STRUCT_SIZE;
+
+        net_event->data = event_data;
+
+        if (vmi_register_event(vmi, net_event) == VMI_FAILURE)
+            printf("Failed to register afinfo event!\n");
+        else
+            push_vmi_event(&vmi_event_head, net_event);
+    }
+
+    // Register UDP Seq Afinfo Events
+    addr_t udp_seq_afinfo[4];
+    if (vmi_read_addr_ksym(vmi, "udplite6_seq_afinfo", &udp_seq_afinfo[0]) == VMI_FAILURE)
+    {
+        printf("Failed to read udplite6_seq_afinfo kernel symbol\n");
+        return false;
+    }
+
+    if (vmi_read_addr_ksym(vmi, "udp6_seq_afinfo", &udp_seq_afinfo[1]) == VMI_FAILURE)
+    {
+        printf("Failed to read udp6_seq_afinfo kernel symbol\n");
+        return false;
+    } 
+
+    if (vmi_read_addr_ksym(vmi, "udplite4_seq_afinfo", &udp_seq_afinfo[2]) == VMI_FAILURE)
+    {
+        printf("Failed to read udplite4_seq_afinfo kernel symbol\n");
+        return false;
+    }
+
+    if (vmi_read_addr_ksym(vmi, "udp4_seq_afinfo", &udp_seq_afinfo[3]) == VMI_FAILURE)
+    {
+        printf("Failed to read udp4_seq_afinfo kernel symbol\n");
+        return false;
+    } 
+
+    for (int i = 0; i < 4; i++){
+        name = vmi_read_str_va(vmi, udp_seq_afinfo[i], 0);    
+        if (!name) 
+        {
+            printf("Failed to find name\n");
+            return false;
+        }
+
+        // Print details
+        printf("%s (struct addr: \%" PRIx64")\n", name, udp_seq_afinfo[i]);
+        if (name) 
+        {
+            free(name);
+            name = NULL;
+        }
+
+        addr_t struct_addr = vmi_translate_kv2p(vmi, udp_seq_afinfo[i]);
+        printf("Registering event for physical addr: %" PRIx64"\n", struct_addr >> 12);
+        // Register write memory event (>> 12 to point to page base)
+        vmi_event_t *net_event = (vmi_event_t *) malloc(sizeof(vmi_event_t));
+        SETUP_MEM_EVENT(net_event, struct_addr >> 12, VMI_MEMACCESS_W, mem_write_cb, 0);
+        
+        // Setup event context data
+        struct event_data *event_data = (struct event_data *) malloc(sizeof(struct event_data));
+        event_data->type = AFINFO_EVENT;
+        event_data->physical_addr = struct_addr;
+        event_data->monitor_size = UDP_AFINFO_STRUCT_SIZE;
+
+        net_event->data = event_data;
+
+        if (vmi_register_event(vmi, net_event) == VMI_FAILURE)
+            printf("Failed to register afinfo event!\n");
+        else
+            push_vmi_event(&vmi_event_head, net_event);
+    }
+
+    return true;
+}
+
 void cleanup(vmi_instance_t vmi)
 {
     // Send Interrupt event to security checking thread
-    event_queue.push(INTERRUPTED_EVENT);
+    interrupted = true;
+    event_deque.push_front(INTERRUPTED_EVENT);
 
     if(PAUSE_VM == 1) 
         vmi_resume_vm(vmi);
@@ -420,43 +583,45 @@ void print_event(vmi_event_t *event)
 
 void *security_checking_thread(void *arg)
 {
-    UNUSED_PARAMETER(arg);
-    printf("Security Checking Thread Initated!\n");
+    vmi_instance_t vmi = (vmi_instance_t)arg;
+    printf("Security Checking Thread Initated:\%" PRIx64"\n", vmi);
 
     // Py_Initialize();
-
-    // PyRun_SimpleString("import sys\n"
-    //                    "sys.path.append('/usr/local/src/volatility-master')\n"
-    //                    "import volatility.conf as conf\n"
-    //                    "import volatility.registry as registry\n"
-    //                    "registry.PluginImporter()\n"
-    //                    "config = conf.ConfObject()\n"
-    //                    "import volatility.commands as commands\n"
-    //                    "import volatility.addrspace as addrspace\n"
-    //                    "registry.register_global_options(config, commands.Command)\n"
-    //                    "registry.register_global_options(config, addrspace.BaseAddressSpace)\n"
-    //                    "config.parse_options()\n"
-    //                    "config.PROFILE='LinuxDebian31604x64'\n"
-    //                    "config.LOCATION='vmi://debian-hvm'\n"
-    //                    "from time import time,ctime\n"
-    //                    "print 'Time is',ctime(time())");
-
     // PyRun_SimpleString("from time import time,ctime\n"
     //                    "print 'Today is',ctime(time())\n");
-
+    int res;
     int event_type = INTERRUPTED_EVENT;
     while(!interrupted)
     {
-        event_type = event_queue.pop();
+        event_type = event_deque.pop();
 
         switch (event_type)
         {
             case PROCESS_EVENT:{
                 printf("Encountered PROCESS_EVENT\n");
+                // Recheck processes
+                register_processes_events(vmi);
+
+                // Volatility Plugin linux_check_fop
+                res = system("python scripts/check_fop.py");
+                // Volatility Plugin linux_check_creds
+                res = system("python scripts/check_creds.py");
                 break;
             } 
             case MODULE_EVENT:{
                 printf("Encountered MODULE_EVENT\n");
+                // Recheck modules 
+                register_modules_events(vmi);
+
+                // Volatility Plugin linux_check_modules
+                res = system("python scripts/check_hidden_modules.py");
+                break;
+            } 
+            case AFINFO_EVENT:
+            {
+                printf("Encountered AFINFO_EVENT\n");
+                // Volatility Plugin linux_check_afinfo
+                res = system("python scripts/check_afinfo.py");
                 break;
             } 
             case INTERRUPTED_EVENT:
@@ -477,6 +642,6 @@ void *security_checking_thread(void *arg)
     }
     
     printf("Security Checking Thread Ended!\n");
-    Py_Finalize();
+    // Py_Finalize();
     return NULL;
 }

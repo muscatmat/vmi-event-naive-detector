@@ -9,7 +9,7 @@ struct event_data
 {
     // Event type
     unsigned long type;
-    
+
     // Physical address of event to monitor
     unsigned long physical_addr;
 
@@ -30,6 +30,7 @@ void print_event(vmi_event_t *event);
 
 bool register_processes_events(vmi_instance_t vmi);
 bool register_modules_events(vmi_instance_t vmi);
+bool register_afinfo_events(vmi_instance_t vmi);
 
 void *security_checking_thread(void *arg);
 

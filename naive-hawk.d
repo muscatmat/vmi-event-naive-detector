@@ -115,9 +115,8 @@
  /usr/local/src/libvmi-master/libvmi/libvmi.h \
  /usr/local/src/libvmi-master/libvmi/events.h \
  /usr/lib/gcc/x86_64-linux-gnu/5/include/stdbool.h \
- /home/muscatmat/Programming/vmi-event-naive-detector/naive-queue.h \
- /usr/include/c++/5/queue /usr/include/c++/5/deque \
- /usr/include/c++/5/bits/stl_algobase.h \
+ /home/muscatmat/Programming/vmi-event-naive-detector/naive-deque.h \
+ /usr/include/c++/5/deque /usr/include/c++/5/bits/stl_algobase.h \
  /usr/include/x86_64-linux-gnu/c++/5/bits/c++config.h \
  /usr/include/x86_64-linux-gnu/c++/5/bits/os_defines.h \
  /usr/include/x86_64-linux-gnu/c++/5/bits/cpu_defines.h \
@@ -147,23 +146,16 @@
  /usr/include/c++/5/bits/stl_uninitialized.h \
  /usr/include/c++/5/bits/stl_deque.h /usr/include/c++/5/initializer_list \
  /usr/include/c++/5/bits/range_access.h /usr/include/c++/5/bits/deque.tcc \
- /usr/include/c++/5/vector /usr/include/c++/5/bits/stl_vector.h \
- /usr/include/c++/5/bits/stl_bvector.h \
- /usr/include/c++/5/bits/functional_hash.h \
- /usr/include/c++/5/bits/hash_bytes.h /usr/include/c++/5/bits/vector.tcc \
- /usr/include/c++/5/bits/stl_heap.h \
+ /usr/include/c++/5/thread /usr/include/c++/5/chrono \
+ /usr/include/c++/5/ratio /usr/include/c++/5/cstdint \
+ /usr/include/c++/5/limits /usr/include/c++/5/ctime \
+ /usr/include/c++/5/bits/parse_numbers.h /usr/include/c++/5/functional \
  /usr/include/c++/5/bits/stl_function.h \
- /usr/include/c++/5/backward/binders.h \
- /usr/include/c++/5/bits/stl_queue.h \
- /usr/include/c++/5/bits/uses_allocator.h /usr/include/c++/5/thread \
- /usr/include/c++/5/chrono /usr/include/c++/5/ratio \
- /usr/include/c++/5/cstdint /usr/include/c++/5/limits \
- /usr/include/c++/5/ctime /usr/include/c++/5/bits/parse_numbers.h \
- /usr/include/c++/5/functional /usr/include/c++/5/typeinfo \
- /usr/include/c++/5/tuple /usr/include/c++/5/utility \
- /usr/include/c++/5/bits/stl_relops.h /usr/include/c++/5/array \
- /usr/include/c++/5/stdexcept /usr/include/c++/5/string \
- /usr/include/c++/5/bits/stringfwd.h \
+ /usr/include/c++/5/backward/binders.h /usr/include/c++/5/typeinfo \
+ /usr/include/c++/5/bits/hash_bytes.h /usr/include/c++/5/tuple \
+ /usr/include/c++/5/utility /usr/include/c++/5/bits/stl_relops.h \
+ /usr/include/c++/5/array /usr/include/c++/5/stdexcept \
+ /usr/include/c++/5/string /usr/include/c++/5/bits/stringfwd.h \
  /usr/include/c++/5/bits/char_traits.h /usr/include/c++/5/bits/postypes.h \
  /usr/include/c++/5/cwchar /usr/include/c++/5/bits/localefwd.h \
  /usr/include/x86_64-linux-gnu/c++/5/bits/c++locale.h \
@@ -178,7 +170,9 @@
  /usr/include/x86_64-linux-gnu/c++/5/bits/atomic_word.h \
  /usr/include/c++/5/ext/string_conversions.h /usr/include/c++/5/cstdlib \
  /usr/include/c++/5/cstdio /usr/include/c++/5/cerrno \
- /usr/include/c++/5/bits/basic_string.tcc /usr/include/c++/5/memory \
+ /usr/include/c++/5/bits/functional_hash.h \
+ /usr/include/c++/5/bits/basic_string.tcc \
+ /usr/include/c++/5/bits/uses_allocator.h /usr/include/c++/5/memory \
  /usr/include/c++/5/bits/stl_tempbuf.h \
  /usr/include/c++/5/bits/stl_raw_storage_iter.h \
  /usr/include/c++/5/ext/concurrence.h \
@@ -194,7 +188,8 @@
  /usr/include/x86_64-linux-gnu/c++/5/bits/error_constants.h \
  /usr/include/c++/5/condition_variable \
  /home/muscatmat/Programming/vmi-event-naive-detector/naive-event-list.h \
- /home/muscatmat/Programming/vmi-event-naive-detector/naive-hawk.h
+ /home/muscatmat/Programming/vmi-event-naive-detector/naive-hawk.h \
+ /usr/include/c++/5/atomic
 
 /usr/include/stdc-predef.h:
 
@@ -526,9 +521,7 @@
 
 /usr/lib/gcc/x86_64-linux-gnu/5/include/stdbool.h:
 
-/home/muscatmat/Programming/vmi-event-naive-detector/naive-queue.h:
-
-/usr/include/c++/5/queue:
+/home/muscatmat/Programming/vmi-event-naive-detector/naive-deque.h:
 
 /usr/include/c++/5/deque:
 
@@ -604,28 +597,6 @@
 
 /usr/include/c++/5/bits/deque.tcc:
 
-/usr/include/c++/5/vector:
-
-/usr/include/c++/5/bits/stl_vector.h:
-
-/usr/include/c++/5/bits/stl_bvector.h:
-
-/usr/include/c++/5/bits/functional_hash.h:
-
-/usr/include/c++/5/bits/hash_bytes.h:
-
-/usr/include/c++/5/bits/vector.tcc:
-
-/usr/include/c++/5/bits/stl_heap.h:
-
-/usr/include/c++/5/bits/stl_function.h:
-
-/usr/include/c++/5/backward/binders.h:
-
-/usr/include/c++/5/bits/stl_queue.h:
-
-/usr/include/c++/5/bits/uses_allocator.h:
-
 /usr/include/c++/5/thread:
 
 /usr/include/c++/5/chrono:
@@ -642,7 +613,13 @@
 
 /usr/include/c++/5/functional:
 
+/usr/include/c++/5/bits/stl_function.h:
+
+/usr/include/c++/5/backward/binders.h:
+
 /usr/include/c++/5/typeinfo:
+
+/usr/include/c++/5/bits/hash_bytes.h:
 
 /usr/include/c++/5/tuple:
 
@@ -700,7 +677,11 @@
 
 /usr/include/c++/5/cerrno:
 
+/usr/include/c++/5/bits/functional_hash.h:
+
 /usr/include/c++/5/bits/basic_string.tcc:
+
+/usr/include/c++/5/bits/uses_allocator.h:
 
 /usr/include/c++/5/memory:
 
@@ -737,3 +718,5 @@
 /home/muscatmat/Programming/vmi-event-naive-detector/naive-event-list.h:
 
 /home/muscatmat/Programming/vmi-event-naive-detector/naive-hawk.h:
+
+/usr/include/c++/5/atomic:

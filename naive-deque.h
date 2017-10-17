@@ -1,19 +1,13 @@
-//
-// Copyright (c) 2013 Juan Palacios juan.palacios.puyana@gmail.com
-// Subject to the BSD 2-Clause License
-// - see < http://opensource.org/licenses/BSD-2-Clause>
-//
+#ifndef CONCURRENT_DEQUE_
+#define CONCURRENT_DEQUE_
 
-#ifndef CONCURRENT_QUEUE_
-#define CONCURRENT_QUEUE_
-
-#include <queue>
+#include <deque>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
 
 template <typename T>
-class Queue
+class Deque
 {
  public:
 
@@ -25,7 +19,7 @@ class Queue
       cond_.wait(mlock);
     }
     auto val = queue_.front();
-    queue_.pop();
+    queue_.pop_front();
     return val;
   }
 
@@ -37,22 +31,31 @@ class Queue
       cond_.wait(mlock);
     }
     item = queue_.front();
-    queue_.pop();
+    queue_.pop_front();
   }
 
-  void push(const T& item)
+  void push_back(const T& item)
   {
     std::unique_lock<std::mutex> mlock(mutex_);
-    queue_.push(item);
+    queue_.push_back(item);
     mlock.unlock();
     cond_.notify_one();
   }
-  Queue()=default;
-  Queue(const Queue&) = delete;            // disable copying
-  Queue& operator=(const Queue&) = delete; // disable assignment
+
+  void push_front(const T& item)
+  {
+    std::unique_lock<std::mutex> mlock(mutex_);
+    queue_.push_front(item);
+    mlock.unlock();
+    cond_.notify_one();
+  }
+
+  Deque()=default;
+  Deque(const Deque&) = delete;            // disable copying
+  Deque& operator=(const Deque&) = delete; // disable assignment
   
  private:
-  std::queue<T> queue_;
+  std::deque<T> queue_;
   std::mutex mutex_;
   std::condition_variable cond_;
 };
