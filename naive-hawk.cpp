@@ -32,6 +32,7 @@ using namespace std;
 /////////////////////
 #define UNUSED_PARAMETER(expr) (void)(expr);
 //#define MYDEBUG
+// #define printf(fmt, ...) (void)(0)
 
 #define PAUSE_VM 0
 
@@ -56,12 +57,16 @@ struct vmi_event_node *vmi_event_head;
 #define OPEN_FILES_STRUCT_SIZE 0x100
 
 // Result Measurements
-//#define MONITORING_MODE
-#define ANALYSIS_MODE
+#define MONITORING_MODE
+//#define ANALYSIS_MODE
+//#define RE_REGISTER_EVENTS
+
 #define MEASURE_EVENT_CALLBACK_TIME
 #define ALWAYS_SEND_EVENT /* Always send event due to register multiple event on same page failure */
+
+// Which events to monitor
 #define MONITOR_PROCESSES_EVENTS
-//#define MONITOR_OPEN_FILES_EVENTS
+#define MONITOR_OPEN_FILES_EVENTS
 //#define MONITOR_MODULES_EVENTS
 //#define MONITOR_AFINFO_EVENTS
 
@@ -136,10 +141,10 @@ int main(int argc, char **argv)
     printf("LibVMI initialise succeeded: %p\n", vmi);
 
     #ifdef MONITORING_MODE    
-    // Start security checking thread
-    pthread_t sec_thread;
-    if (pthread_create(&sec_thread, NULL, security_checking_thread, (void *)vmi) != 0)
-        printf("Failed to create thread");
+        // Start security checking thread
+        pthread_t sec_thread;
+        if (pthread_create(&sec_thread, NULL, security_checking_thread, (void *)vmi) != 0)
+            printf("Failed to create thread");
     #endif
 
     if(PAUSE_VM == 1) 
@@ -154,59 +159,51 @@ int main(int argc, char **argv)
     }
     
     #ifdef MONITOR_PROCESSES_EVENTS
-    // Register Processes Events
-    if (register_processes_events(vmi) == false)
-    {
-        printf("Registering of processes events failed!\n");
+        // Register Processes Events
+        if (register_processes_events(vmi) == false)
+        {
+            printf("Registering of processes events failed!\n");
 
-        cleanup(vmi);
-        printf("Naive Event Hawk-Eye Program Ended!\n");
-        return 4;
-    }
+            cleanup(vmi);
+            printf("Naive Event Hawk-Eye Program Ended!\n");
+            return 4;
+        }
+    #endif
 
-    // Register file Events
-    if (register_open_files_events(vmi) == false)
-    {
-        printf("Registering of file events failed!\n");
+    #ifdef MONITOR_OPEN_FILES_EVENTS
+        // Register file Events
+        if (register_open_files_events(vmi) == false)
+        {
+            printf("Registering of file events failed!\n");
 
-        cleanup(vmi);
-        printf("Naive Event Hawk-Eye Program Ended!\n");
-        return 4;
-    }
-    #elif MONITOR_OPEN_FILES_EVENTS
-    // Register file Events
-    if (register_open_files_events(vmi) == false)
-    {
-        printf("Registering of file events failed!\n");
-
-        cleanup(vmi);
-        printf("Naive Event Hawk-Eye Program Ended!\n");
-        return 4;
-    }
+            cleanup(vmi);
+            printf("Naive Event Hawk-Eye Program Ended!\n");
+            return 4;
+        }
     #endif
 
     #ifdef MONITOR_MODULES_EVENTS
-    // Register Modules Events
-    if (register_modules_events(vmi) == false)
-    {
-        printf("Registering of modules events failed!\n");
+        // Register Modules Events
+        if (register_modules_events(vmi) == false)
+        {
+            printf("Registering of modules events failed!\n");
 
-        cleanup(vmi);
-        printf("Naive Event Hawk-Eye Program Ended!\n");
-        return 5;
-    }
+            cleanup(vmi);
+            printf("Naive Event Hawk-Eye Program Ended!\n");
+            return 5;
+        }
     #endif
 
     #ifdef MONITOR_AFINFO_EVENTS
-    // Register Afinfo Events
-    if (register_afinfo_events(vmi) == false)
-    {
-        printf("Registering of af info events failed!\n");
+        // Register Afinfo Events
+        if (register_afinfo_events(vmi) == false)
+        {
+            printf("Registering of af info events failed!\n");
 
-        cleanup(vmi);
-        printf("Naive Event Hawk-Eye Program Ended!\n");
-        return 5;
-    }
+            cleanup(vmi);
+            printf("Naive Event Hawk-Eye Program Ended!\n");
+            return 5;
+        }
     #endif
 
     printf("Waiting for events...\n");
@@ -232,8 +229,8 @@ int main(int argc, char **argv)
 event_response_t mem_write_cb(vmi_instance_t vmi, vmi_event_t *event) 
 { 
     #ifdef MEASURE_EVENT_CALLBACK_TIME
-    clock_t t;
-    t = clock();
+        clock_t t;
+        t = clock();
     #endif
 
     #ifdef ALWAYS_SEND_EVENT
@@ -248,8 +245,8 @@ event_response_t mem_write_cb(vmi_instance_t vmi, vmi_event_t *event)
         vmi_step_event(vmi, event, event->vcpu_id, 1, NULL);
 
         #ifdef MEASURE_EVENT_CALLBACK_TIME
-        t = clock() - t;
-        printf("mem_write_cb() took %f seconds to execute \n", ((double)t)/CLOCKS_PER_SEC);
+            t = clock() - t;
+            printf("mem_write_cb() took %f seconds to execute \n", ((double)t)/CLOCKS_PER_SEC);
         #endif
 
         return VMI_EVENT_RESPONSE_NONE;
@@ -278,14 +275,14 @@ event_response_t mem_write_cb(vmi_instance_t vmi, vmi_event_t *event)
     // print_event(event);
 
     #ifdef MONITORING_MODE
-    event_deque.push_back(data->type);
+        event_deque.push_back(data->type);
     #endif
 
     vmi_step_event(vmi, event, event->vcpu_id, 1, NULL);
 
     #ifdef MEASURE_EVENT_CALLBACK_TIME
-    t = clock() - t;
-    printf("mem_write_cb() took %f seconds to execute \n", ((double)t)/CLOCKS_PER_SEC);
+        t = clock() - t;
+        printf("mem_write_cb() took %f seconds to execute \n", ((double)t)/CLOCKS_PER_SEC);
     #endif
 
     return VMI_EVENT_RESPONSE_NONE;
@@ -725,10 +722,11 @@ void *security_checking_thread(void *arg)
         {
             case PROCESS_EVENT:{
                 printf("Encountered PROCESS_EVENT\n");
-                // Recheck processes
-                register_processes_events(vmi);
-                // Recheck open files
-                register_open_files_events(vmi);
+                #ifdef RE_REGISTER_EVENTS
+                    // Recheck processes
+                    register_processes_events(vmi);
+                #endif
+
                 #ifdef ANALYSIS_MODE
                     // Volatility Plugin linux_check_fop
                     res = system("python scripts/check_fop.py");
@@ -739,8 +737,10 @@ void *security_checking_thread(void *arg)
             } 
             case OPEN_FILES_EVENT:{
                 printf("Encountered OPEN_FILES_EVENT\n");
-                // Recheck open files
-                register_open_files_events(vmi);
+                #ifdef RE_REGISTER_EVENTS
+                    // Recheck open files
+                    register_open_files_events(vmi);
+                #endif
 
                 #ifdef ANALYSIS_MODE
                     // Volatility Plugin linux_check_afinfo
@@ -750,8 +750,10 @@ void *security_checking_thread(void *arg)
             }
             case MODULE_EVENT:{
                 printf("Encountered MODULE_EVENT\n");
-                // Recheck modules 
-                register_modules_events(vmi);
+                #ifdef RE_REGISTER_EVENTS
+                    // Recheck modules 
+                    register_modules_events(vmi);
+                #endif
 
                 #ifdef ANALYSIS_MODE
                     // Volatility Plugin linux_check_modules
