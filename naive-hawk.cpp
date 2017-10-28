@@ -19,13 +19,15 @@
 #include <libvmi/libvmi.h> 
 #include <libvmi/events.h>
 
+#include <atomic>
+#include <fstream>
+#include <string>
+
+using namespace std;
+
 #include "naive-deque.h"
 #include "naive-event-list.h"
 #include "naive-hawk.h"
-
-#include <atomic>
-
-using namespace std;
   
 /////////////////////
 // Defines
@@ -48,13 +50,6 @@ using namespace std;
 /////////////////////
 Deque<int> event_deque;
 struct vmi_event_node *vmi_event_head;
-
-//  VM Specific Information (Retrieved from Volatility)
-#define TASK_STRUCT_SIZE 0x950
-#define MODULE_STRUCT_SIZE 0x258
-#define TCP_AFINFO_STRUCT_SIZE 0x38
-#define UDP_AFINFO_STRUCT_SIZE 0x40
-#define OPEN_FILES_STRUCT_SIZE 0x100
 
 // Result Measurements
 #define MONITORING_MODE
@@ -85,18 +80,92 @@ static void close_handler(int sig)
     event_deque.push_front(INTERRUPTED_EVENT);
 }
 
+static int retrieve_struct_size(string file_path, string struct_name){
+    int result = -1;
+    ifstream in_file(file_path);
+
+    string struct_substr("<DW_TAG_structure_type> DW_AT_name<\"" + struct_name + "\">");
+    string struct_size_substr("DW_AT_byte_size<");
+    string line;
+    while (getline(in_file, line))
+    {
+        if (line.find(struct_substr) != string::npos){
+            string temp_mem_loc(line.substr(line.find(struct_size_substr) + struct_size_substr.size()));
+            result = stoi(temp_mem_loc.substr(0, temp_mem_loc.find(">")), NULL, 16);
+            break;
+        }
+    }
+
+    return result;
+}
+
+static int retrieve_offset(string file_path, string struct_name, string member_name){
+    int result = -1;
+    ifstream in_file(file_path);
+
+    string struct_substr("<DW_TAG_structure_type> DW_AT_name<\"" + struct_name + "\">");
+    string member_substr("<DW_TAG_member> DW_AT_name<\"" + member_name + "\">");
+    string member_loc_substr("DW_AT_data_member_location<");
+    
+    bool struct_found = false;
+    string line;
+    while (getline(in_file, line))
+    {
+        if (struct_found)
+        {
+            if (line.substr(1,1).compare("2") != 0){
+                printf("Member: %s not found in struct: %s\n", member_name.c_str(), struct_name.c_str());
+                break;
+            }
+
+            if (line.find(member_substr) != string::npos){
+                string temp_mem_loc(line.substr(line.find(member_loc_substr) + member_loc_substr.size()));
+                result = stoi(temp_mem_loc.substr(0, temp_mem_loc.size() - 1));
+                break;
+            }
+        }
+
+        if (line.find(struct_substr) != string::npos){
+            struct_found = true;
+            continue;
+        }
+    }
+
+    return result;
+}
+
 int main(int argc, char **argv)
 {
     clock_t program_time = clock();
     printf("Naive Event Hawk Program Initiated!\n");
 
-    if(argc != 2)
+    if(argc < 3)
     {
-        fprintf(stderr, "Usage: naive-hawk <Guest VM Name> \n");
+        fprintf(stderr, "Usage: naive-hawk <VM Name> <VM module.dwarf> <monitor events list e.g process OR module OR net OR files>\n");
         printf("Naive Event Hawk-Eye Program Ended!\n");
         return 1; 
     }
 
+    // Setup module dwarf file
+    string dwarf_fp(argv[2]);
+
+    bool monitor_process = false;
+    bool monitor_modules = false;
+    bool monitor_net = false;
+    bool monitor_files = false;
+    if (argc > 3){
+        for (int i = 3; i < argc; i++){
+            if (strcmp(argv[i], "process") == 0)
+                monitor_process = true;
+            else if (strcmp(argv[i], "module") == 0)
+                monitor_modules = true;
+            else if (strcmp(argv[i], "net") == 0)
+                monitor_net = true;
+            else if (strcmp(argv[i], "files") == 0)
+                monitor_files = true;
+        }
+    }
+    
     // FILE *fp;
     // char path[1035];
 
@@ -160,7 +229,7 @@ int main(int argc, char **argv)
     
     #ifdef MONITOR_PROCESSES_EVENTS
         // Register Processes Events
-        if (register_processes_events(vmi) == false)
+        if (register_processes_events(vmi, dwarf_fp) == false)
         {
             printf("Registering of processes events failed!\n");
 
@@ -172,7 +241,7 @@ int main(int argc, char **argv)
 
     #ifdef MONITOR_OPEN_FILES_EVENTS
         // Register file Events
-        if (register_open_files_events(vmi) == false)
+        if (register_open_files_events(vmi, dwarf_fp) == false)
         {
             printf("Registering of file events failed!\n");
 
@@ -184,7 +253,7 @@ int main(int argc, char **argv)
 
     #ifdef MONITOR_MODULES_EVENTS
         // Register Modules Events
-        if (register_modules_events(vmi) == false)
+        if (register_modules_events(vmi, dwarf_fp) == false)
         {
             printf("Registering of modules events failed!\n");
 
@@ -196,7 +265,7 @@ int main(int argc, char **argv)
 
     #ifdef MONITOR_AFINFO_EVENTS
         // Register Afinfo Events
-        if (register_afinfo_events(vmi) == false)
+        if (register_afinfo_events(vmi, dwarf_fp) == false)
         {
             printf("Registering of af info events failed!\n");
 
@@ -295,7 +364,7 @@ void free_event_data(vmi_event_t *event, status_t rc)
     free(data); 
 }
 
-bool register_processes_events(vmi_instance_t vmi)
+bool register_processes_events(vmi_instance_t vmi, string dwarf_fp)
 {
     printf("Registering Processes Events\n");
 
@@ -370,7 +439,7 @@ bool register_processes_events(vmi_instance_t vmi)
         struct event_data *event_data = (struct event_data *) malloc(sizeof(struct event_data));
         event_data->type = PROCESS_EVENT;
         event_data->physical_addr = struct_addr;
-        event_data->monitor_size = TASK_STRUCT_SIZE;
+        event_data->monitor_size = retrieve_struct_size(dwarf_fp,"task_struct");
 
         proc_event->data = event_data;
 
@@ -391,7 +460,7 @@ bool register_processes_events(vmi_instance_t vmi)
     return true;
 }
 
-bool register_open_files_events(vmi_instance_t vmi)
+bool register_open_files_events(vmi_instance_t vmi, string dwarf_fp)
 {
     printf("Registering open files events\n");
 
@@ -445,7 +514,7 @@ bool register_open_files_events(vmi_instance_t vmi)
             struct event_data *event_data = (struct event_data *) malloc(sizeof(struct event_data));
             event_data->type = OPEN_FILES_EVENT;
             event_data->physical_addr = current_page_base;
-            event_data->monitor_size = OPEN_FILES_STRUCT_SIZE;
+            event_data->monitor_size = retrieve_struct_size(dwarf_fp,"file");
 
             proc_event->data = event_data;
 
@@ -465,7 +534,7 @@ bool register_open_files_events(vmi_instance_t vmi)
     return true;
 }
 
-bool register_modules_events(vmi_instance_t vmi)
+bool register_modules_events(vmi_instance_t vmi, string dwarf_fp)
 {
     printf("Registering Modules Events\n");
 
@@ -513,7 +582,7 @@ bool register_modules_events(vmi_instance_t vmi)
         struct event_data *event_data = (struct event_data *) malloc(sizeof(struct event_data));
         event_data->type = MODULE_EVENT;
         event_data->physical_addr = struct_addr;
-        event_data->monitor_size = MODULE_STRUCT_SIZE;
+        event_data->monitor_size = retrieve_struct_size(dwarf_fp,"module");
 
         mod_event->data = event_data;
 
@@ -533,7 +602,7 @@ bool register_modules_events(vmi_instance_t vmi)
     return true;
 }
 
-bool register_afinfo_events(vmi_instance_t vmi){
+bool register_afinfo_events(vmi_instance_t vmi, string dwarf_fp){
 
     printf("Registering Afinfo Events\n");
     char *name = NULL;
@@ -578,7 +647,7 @@ bool register_afinfo_events(vmi_instance_t vmi){
         struct event_data *event_data = (struct event_data *) malloc(sizeof(struct event_data));
         event_data->type = AFINFO_EVENT;
         event_data->physical_addr = struct_addr;
-        event_data->monitor_size = TCP_AFINFO_STRUCT_SIZE;
+        event_data->monitor_size = retrieve_struct_size(dwarf_fp,"tcp_seq_afinfo");
 
         net_event->data = event_data;
 
@@ -640,7 +709,7 @@ bool register_afinfo_events(vmi_instance_t vmi){
         struct event_data *event_data = (struct event_data *) malloc(sizeof(struct event_data));
         event_data->type = AFINFO_EVENT;
         event_data->physical_addr = struct_addr;
-        event_data->monitor_size = UDP_AFINFO_STRUCT_SIZE;
+        event_data->monitor_size = retrieve_struct_size(dwarf_fp,"udp_seq_afinfo");
 
         net_event->data = event_data;
 

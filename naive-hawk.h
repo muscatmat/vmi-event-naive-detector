@@ -14,7 +14,7 @@ struct event_data
     unsigned long physical_addr;
 
     // Size of monitoring page
-    unsigned long monitor_size;
+    int monitor_size;
 };
 
 ///////////////////// 
@@ -28,10 +28,10 @@ event_response_t mem_write_cb(vmi_instance_t vmi, vmi_event_t *event);
 void free_event_data(vmi_event_t *event, status_t rc);
 void print_event(vmi_event_t *event);
 
-bool register_processes_events(vmi_instance_t vmi);
-bool register_open_files_events(vmi_instance_t vmi);
-bool register_modules_events(vmi_instance_t vmi);
-bool register_afinfo_events(vmi_instance_t vmi);
+bool register_processes_events(vmi_instance_t vmi, string dwarf_fp);
+bool register_open_files_events(vmi_instance_t vmi, string dwarf_fp);
+bool register_modules_events(vmi_instance_t vmi, string dwarf_fp);
+bool register_afinfo_events(vmi_instance_t vmi, string dwarf_fp);
 
 void *security_checking_thread(void *arg);
 
