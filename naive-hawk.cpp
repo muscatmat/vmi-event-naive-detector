@@ -50,6 +50,7 @@ using namespace std;
 /////////////////////
 Deque<int> event_deque;
 struct vmi_event_node *vmi_event_head;
+string dwarf_fp;
 
 // Result Measurements
 #define MONITORING_MODE
@@ -58,12 +59,6 @@ struct vmi_event_node *vmi_event_head;
 
 #define MEASURE_EVENT_CALLBACK_TIME
 #define ALWAYS_SEND_EVENT /* Always send event due to register multiple event on same page failure */
-
-// Which events to monitor
-#define MONITOR_PROCESSES_EVENTS
-#define MONITOR_OPEN_FILES_EVENTS
-//#define MONITOR_MODULES_EVENTS
-//#define MONITOR_AFINFO_EVENTS
 
 // Result variables
 long irrelevant_events_count = 0;
@@ -147,7 +142,7 @@ int main(int argc, char **argv)
     }
 
     // Setup module dwarf file
-    string dwarf_fp(argv[2]);
+    dwarf_fp = string(argv[2]);
 
     bool monitor_process = false;
     bool monitor_modules = false;
@@ -165,25 +160,6 @@ int main(int argc, char **argv)
                 monitor_files = true;
         }
     }
-    
-    // FILE *fp;
-    // char path[1035];
-
-    // fp = popen("python python-scripts/test.py", "r");
-    //     if (fp == NULL) {
-    //     printf("Failed to run command\n" );
-    //     exit(1);
-    // }
-
-    // /* Read the output a line at a time - output it. */
-    // while (fgets(path, sizeof(path)-1, fp) != NULL) {
-    //     printf("%s", path);
-    // }
-
-    // /* close */
-    // pclose(fp);
-
-    //system("python python-scripts/test.py");
 
     // Initialise variables
     vmi_instance_t vmi;
@@ -227,53 +203,45 @@ int main(int argc, char **argv)
         }
     }
     
-    #ifdef MONITOR_PROCESSES_EVENTS
-        // Register Processes Events
-        if (register_processes_events(vmi, dwarf_fp) == false)
-        {
-            printf("Registering of processes events failed!\n");
+    // Register Processes Events
+    if (monitor_process && register_processes_events(vmi, dwarf_fp) == false)
+    {
+        printf("Registering of processes events failed!\n");
 
-            cleanup(vmi);
-            printf("Naive Event Hawk-Eye Program Ended!\n");
-            return 4;
-        }
-    #endif
+        cleanup(vmi);
+        printf("Naive Event Hawk-Eye Program Ended!\n");
+        return 4;
+    }
 
-    #ifdef MONITOR_OPEN_FILES_EVENTS
-        // Register file Events
-        if (register_open_files_events(vmi, dwarf_fp) == false)
-        {
-            printf("Registering of file events failed!\n");
+    // Register file Events
+    if (monitor_files && register_open_files_events(vmi, dwarf_fp) == false)
+    {
+        printf("Registering of file events failed!\n");
 
-            cleanup(vmi);
-            printf("Naive Event Hawk-Eye Program Ended!\n");
-            return 4;
-        }
-    #endif
+        cleanup(vmi);
+        printf("Naive Event Hawk-Eye Program Ended!\n");
+        return 4;
+    }
 
-    #ifdef MONITOR_MODULES_EVENTS
-        // Register Modules Events
-        if (register_modules_events(vmi, dwarf_fp) == false)
-        {
-            printf("Registering of modules events failed!\n");
+    // Register Modules Events
+    if (monitor_modules && register_modules_events(vmi, dwarf_fp) == false)
+    {
+        printf("Registering of modules events failed!\n");
 
-            cleanup(vmi);
-            printf("Naive Event Hawk-Eye Program Ended!\n");
-            return 5;
-        }
-    #endif
+        cleanup(vmi);
+        printf("Naive Event Hawk-Eye Program Ended!\n");
+        return 5;
+    }
 
-    #ifdef MONITOR_AFINFO_EVENTS
-        // Register Afinfo Events
-        if (register_afinfo_events(vmi, dwarf_fp) == false)
-        {
-            printf("Registering of af info events failed!\n");
+    // Register Afinfo Events
+    if (monitor_net && register_afinfo_events(vmi, dwarf_fp) == false)
+    {
+        printf("Registering of af info events failed!\n");
 
-            cleanup(vmi);
-            printf("Naive Event Hawk-Eye Program Ended!\n");
-            return 5;
-        }
-    #endif
+        cleanup(vmi);
+        printf("Naive Event Hawk-Eye Program Ended!\n");
+        return 5;
+    }
 
     printf("Waiting for events...\n");
     while (!interrupted)
@@ -793,7 +761,7 @@ void *security_checking_thread(void *arg)
                 printf("Encountered PROCESS_EVENT\n");
                 #ifdef RE_REGISTER_EVENTS
                     // Recheck processes
-                    register_processes_events(vmi);
+                    register_processes_events(vmi, dwarf_fp);
                 #endif
 
                 #ifdef ANALYSIS_MODE
@@ -808,7 +776,7 @@ void *security_checking_thread(void *arg)
                 printf("Encountered OPEN_FILES_EVENT\n");
                 #ifdef RE_REGISTER_EVENTS
                     // Recheck open files
-                    register_open_files_events(vmi);
+                    register_open_files_events(vmi, dwarf_fp);
                 #endif
 
                 #ifdef ANALYSIS_MODE
@@ -821,7 +789,7 @@ void *security_checking_thread(void *arg)
                 printf("Encountered MODULE_EVENT\n");
                 #ifdef RE_REGISTER_EVENTS
                     // Recheck modules 
-                    register_modules_events(vmi);
+                    register_modules_events(vmi, dwarf_fp);
                 #endif
 
                 #ifdef ANALYSIS_MODE
